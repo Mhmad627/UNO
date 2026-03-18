@@ -260,6 +260,23 @@
     text-transform: uppercase;
   }
 
+  .kick-btn {
+    margin-left: auto;
+    background: rgba(230,57,70,0.12);
+    border: 1px solid rgba(230,57,70,0.35);
+    border-radius: 6px;
+    color: var(--red);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 2px 8px;
+    line-height: 1.5;
+    transition: background 0.1s;
+    touch-action: manipulation;
+  }
+
+  .kick-btn:hover { background: rgba(230,57,70,0.28); }
+
   /* ── GAME SCREEN ── */
   #game-screen {
     min-height: 100vh;
@@ -741,6 +758,45 @@
     to { transform: rotate(360deg); }
   }
 
+  .scoreboard {
+    background: var(--surface2);
+    border-radius: 12px;
+    padding: 0.75rem 1.25rem;
+    min-width: 220px;
+    max-width: 340px;
+    width: 100%;
+  }
+
+  .scoreboard-title {
+    font-family: 'Boogaloo', cursive;
+    font-size: 1.1rem;
+    color: var(--yellow);
+    margin-bottom: 0.5rem;
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+
+  .scoreboard-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.95rem;
+  }
+
+  .scoreboard-row:last-child { border-bottom: none; }
+
+  .scoreboard-row.is-winner .score-name { color: var(--yellow); font-weight: 800; }
+
+  .score-wins {
+    font-family: 'Boogaloo', cursive;
+    font-size: 1.1rem;
+    color: var(--green);
+    min-width: 2.5rem;
+    text-align: right;
+  }
+
   .draw-pending-banner {
     background: var(--red);
     border-radius: 99px;
@@ -961,6 +1017,7 @@
     <div class="win-confetti">🎉</div>
     <div class="win-title" id="win-title"></div>
     <div style="color:var(--muted);" id="win-sub"></div>
+    <div class="scoreboard" id="scoreboard"></div>
     <button class="btn btn-success" onclick="restartGame()" id="restart-btn" style="width:200px; display:none;">▶ Play Again Now</button>
     <button class="btn btn-primary" onclick="rematch()" id="rematch-btn" style="width:200px; display:none;">🔄 Back to Lobby</button>
     <button class="btn btn-outline" onclick="backToLobby()" style="width:200px;">← Leave</button>
@@ -1109,6 +1166,11 @@ function handleServerMsg(msg) {
   if (msg.type === 'chat') {
     addChat(msg.msg);
   }
+
+  if (msg.type === 'kicked') {
+    alert('You were kicked from the game.');
+    location.reload();
+  }
 }
 
 // ─── Rendering ─────────────────────────────────────────────────────────────────
@@ -1116,8 +1178,8 @@ function renderState(s) {
   // Lobby state
   if (s.state === 'lobby') {
     showScreen('waiting-screen');
-    renderLobbyPlayers(s);
     isHost = s.players[0]?.id === myId;
+    renderLobbyPlayers(s);
     document.getElementById('start-btn').style.display = isHost ? 'block' : 'none';
     document.getElementById('waiting-msg').style.display = isHost ? 'none' : 'block';
     document.getElementById('win-screen').classList.remove('show');
@@ -1133,6 +1195,16 @@ function renderState(s) {
       s.winner === myId ? '🏆 You Win!' : `${winner?.name || '?'} Wins!`;
     document.getElementById('win-sub').textContent =
       s.winner === myId ? 'Congratulations! 🎉' : 'Better luck next time!';
+    // Render scoreboard
+    const scores = s.scores || {};
+    const sorted = [...s.players].sort((a, b) => (scores[b.id] || 0) - (scores[a.id] || 0));
+    const sb = document.getElementById('scoreboard');
+    sb.innerHTML = `<div class="scoreboard-title">🏅 Wins</div>` +
+      sorted.map(p => `
+        <div class="scoreboard-row${p.id === s.winner ? ' is-winner' : ''}">
+          <span class="score-name">${p.id === myId ? 'You' : p.name}</span>
+          <span class="score-wins">${scores[p.id] || 0}</span>
+        </div>`).join('');
     document.getElementById('restart-btn').style.display = isHost ? 'block' : 'none';
     document.getElementById('rematch-btn').style.display = isHost ? 'block' : 'none';
     if (!document.getElementById('win-screen').classList.contains('show')) {
@@ -1168,6 +1240,13 @@ function renderLobbyPlayers(s) {
       badge.className = 'host-badge';
       badge.textContent = 'Host';
       row.appendChild(badge);
+    } else if (isHost) {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'kick-btn';
+      kickBtn.textContent = '✕ Kick';
+      kickBtn.title = `Kick ${p.name}`;
+      kickBtn.onclick = () => kickPlayer(p.id);
+      row.appendChild(kickBtn);
     }
     el.appendChild(row);
   });
@@ -1267,6 +1346,26 @@ function renderGame(s) {
   // Host controls visibility
   const hostMenuWrap = document.getElementById('host-menu-wrap');
   if (hostMenuWrap) hostMenuWrap.style.display = isHost ? 'block' : 'none';
+
+  // Populate kick entries in host dropdown
+  if (isHost) {
+    const dropdown = document.getElementById('host-dropdown');
+    dropdown.querySelectorAll('.kick-entry').forEach(el => el.remove());
+    const others = s.players.filter(p => p.id !== myId);
+    if (others.length > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'kick-entry';
+      sep.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);margin:0.2rem 0;';
+      dropdown.appendChild(sep);
+      others.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'host-dropdown-item danger kick-entry';
+        btn.textContent = `👢 Kick ${p.name}`;
+        btn.onclick = () => { kickPlayer(p.id); closeHostMenu(); };
+        dropdown.appendChild(btn);
+      });
+    }
+  }
 
   // Circular player layout — orbit each non-me player around the game board center.
   // Orbit radius is computed from the ring's actual rendered size so players always
@@ -1481,6 +1580,10 @@ function toggleHostMenu(e) {
 
 function closeHostMenu() {
   document.getElementById('host-dropdown')?.classList.remove('open');
+}
+
+function kickPlayer(targetId) {
+  ws.send(JSON.stringify({ type: 'kick', targetId }));
 }
 
 function backToLobby() {

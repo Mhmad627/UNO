@@ -77,6 +77,7 @@ function createRoom(hostId, hostName) {
     mustCallUno: null, // playerId who just played to 1 card without calling UNO early
     unoCalledWith2: [], // playerIds who called UNO while holding 2 cards
     winner: null,
+    scores: {},
   };
   players[hostId].roomCode = code;
   return code;
@@ -262,6 +263,7 @@ function roomPublicState(room) {
     drawPending: room.drawPending,
     deckSize: room.deck.length,
     winner: room.winner,
+    scores: room.scores,
     players: room.players.map((p) => ({
       id: p.id,
       name: p.name,
@@ -383,6 +385,7 @@ function handleMessage(socketId, msg) {
     if (hand.length === 0) {
       room.state = "ended";
       room.winner = socketId;
+      room.scores[socketId] = (room.scores[socketId] || 0) + 1;
       for (const p of room.players) {
         sendTo(p.id, { type: "state", ...fullStateFor(room, p.id) });
       }
@@ -531,6 +534,40 @@ function handleMessage(socketId, msg) {
     room.mustCallUno = null;
     room.unoCalledWith2 = [];
     for (const p of room.players) p.hand = [];
+    for (const p of room.players) {
+      sendTo(p.id, { type: "state", ...fullStateFor(room, p.id) });
+    }
+    return;
+  }
+
+  // ── KICK ──────────────────────────────────────────────────────────────────
+  if (type === "kick") {
+    if (room.hostId !== socketId) return;
+    const targetId = data.targetId;
+    if (!targetId || targetId === socketId) return;
+    const pIdx = room.players.findIndex((p) => p.id === targetId);
+    if (pIdx === -1) return;
+    const kicked = room.players[pIdx];
+    sendTo(targetId, { type: "kicked" });
+    if (room.state === "playing") {
+      room.deck.push(...kicked.hand);
+      room.players.splice(pIdx, 1);
+      if (room.mustCallUno === targetId) room.mustCallUno = null;
+      room.unoCalledWith2 = room.unoCalledWith2.filter((id) => id !== targetId);
+      const remaining = room.players.length;
+      if (remaining < 2) {
+        room.state = "ended";
+        room.winner = remaining === 1 ? room.players[0].id : null;
+        if (room.winner) room.scores[room.winner] = (room.scores[room.winner] || 0) + 1;
+      } else {
+        if (pIdx < room.currentPlayerIndex) room.currentPlayerIndex--;
+        else if (pIdx === room.currentPlayerIndex) room.currentPlayerIndex = room.currentPlayerIndex % remaining;
+      }
+    } else {
+      room.players.splice(pIdx, 1);
+    }
+    delete players[targetId];
+    broadcastAll(room, { type: "chat", msg: `👢 ${kicked.name} was kicked by the host.` });
     for (const p of room.players) {
       sendTo(p.id, { type: "state", ...fullStateFor(room, p.id) });
     }
