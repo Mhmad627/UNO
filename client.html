@@ -629,16 +629,16 @@
     50% { transform: scale(1.07); box-shadow: 0 0 18px rgba(230,57,70,0.75); }
   }
 
-  /* Chat — hidden when empty, auto-dismisses after a few seconds */
+  /* Chat — permanent, pinned to bottom */
   .chat-area {
     background: var(--surface);
     border-radius: 12px;
     padding: 0.4rem 0.5rem;
-    max-height: 56px;
+    max-height: 120px;
     overflow-y: auto;
     font-size: 0.78rem;
     flex-shrink: 0;
-    display: none;
+    display: block;
   }
 
   .chat-msg {
@@ -943,8 +943,6 @@
 
     <div class="draw-pending-banner" id="draw-banner"></div>
 
-    <div class="chat-area" id="chat-log"></div>
-
     <div class="action-row">
       <button class="btn btn-yellow" onclick="callUno()" id="uno-btn">🗣️ UNO!</button>
       <button class="btn btn-outline" onclick="catchUno()">👆 Catch UNO</button>
@@ -954,6 +952,8 @@
       <div class="hand-label">Your Hand</div>
       <div class="hand-cards" id="my-hand"></div>
     </div>
+
+    <div class="chat-area" id="chat-log"></div>
   </div>
 
   <!-- ── WIN SCREEN ── -->
@@ -1506,10 +1506,6 @@ function addChat(msg) {
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
   while (log.children.length > 50) log.removeChild(log.firstChild);
-  // Show briefly then auto-hide
-  log.style.display = 'block';
-  clearTimeout(log._hideTimer);
-  log._hideTimer = setTimeout(() => { log.style.display = 'none'; }, 4000);
 }
 
 // Close host dropdown when clicking/tapping elsewhere
