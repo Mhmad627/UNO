@@ -109,11 +109,12 @@ function startGame(room) {
     for (let i = 0; i < 7; i++) p.hand.push(room.deck.pop());
   }
 
-  // Flip first card (skip wilds as starting card)
+  // Flip first card — must be a number (no action or wild cards)
+  const ACTION_VALUES = new Set(["wild", "wild4", "skip", "reverse", "draw2"]);
   let first;
   do {
     first = room.deck.pop();
-    if (first.value === "wild" || first.value === "wild4") {
+    if (ACTION_VALUES.has(first.value)) {
       room.deck.unshift(first);
       first = null;
     }
@@ -121,18 +122,6 @@ function startGame(room) {
 
   room.discard.push(first);
   room.currentColor = first.color;
-
-  // Apply first card effects
-  if (first.value === "skip") {
-    room.currentPlayerIndex = nextIndex(room, room.currentPlayerIndex);
-  } else if (first.value === "reverse") {
-    room.direction = -1;
-    if (room.players.length === 2) {
-      room.currentPlayerIndex = nextIndex(room, room.currentPlayerIndex);
-    }
-  } else if (first.value === "draw2") {
-    room.drawPending = 2;
-  }
 }
 
 function nextIndex(room, from) {
