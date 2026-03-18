@@ -821,8 +821,26 @@
     #game-screen { padding: 0.25rem; gap: 0.25rem; }
     .table-area { gap: 1rem; padding: 0.5rem; }
     .opponent-chip { padding: 0.3rem 0.5rem; font-size: 0.78rem; gap: 0.3rem; }
-.top-bar { padding: 0.4rem 0.75rem; font-size: 0.8rem; }
+    .top-bar { padding: 0.4rem 0.75rem; font-size: 0.8rem; }
     .top-bar .room-info { font-size: 0.95rem; }
+    .direction-ring {
+      width: clamp(150px, 42vw, 200px);
+      height: clamp(150px, 42vw, 200px);
+    }
+    .node-avatar {
+      width: 32px;
+      height: 32px;
+      font-size: 0.85rem;
+    }
+    .node-name {
+      font-size: 0.55rem;
+      max-width: 38px;
+    }
+    .node-count {
+      font-size: 0.6rem;
+      min-width: 18px;
+      padding: 1px 3px;
+    }
   }
 
   @media (max-width: 480px) {
@@ -1394,14 +1412,14 @@ function renderGame(s) {
   const nonMe = s.direction === 1 ? orderedNonMe : [...orderedNonMe].reverse();
   const count = nonMe.length;
 
-  // Measure board and infer ring radius from its CSS (clamp(200px, 55vw, 260px))
-  const boardW  = boardEl.offsetWidth  || window.innerWidth;
-  const boardH  = boardEl.offsetHeight || 320;
-  const ringCSS = Math.min(320, Math.max(260, window.innerWidth * 0.68));
-  const ringR   = (120 / 280) * ringCSS;            // arc radius in px
-  const aR      = n >= 9 ? 17 : 22;                 // avatar radius (compact vs normal)
-  const orbitRx = Math.min(boardW * 0.46, Math.max(ringR + aR + 14, boardW * 0.36));
-  const orbitRy = Math.min(boardH * 0.46, Math.max(ringR + aR + 14, boardH * 0.32));
+  // Measure board and ring from actual rendered DOM size so mobile CSS overrides are respected
+  const boardW    = boardEl.offsetWidth  || window.innerWidth;
+  const boardH    = boardEl.offsetHeight || 320;
+  const ringSize  = (ringEl && ringEl.offsetWidth) ? ringEl.offsetWidth : Math.min(320, Math.max(260, window.innerWidth * 0.68));
+  const ringR     = (120 / 280) * ringSize;          // arc radius in px (SVG viewBox is 280, circle r=120)
+  const aR        = n >= 9 ? 14 : (window.innerWidth <= 600 ? 18 : 22); // smaller avatars on mobile
+  const orbitRx = Math.min(boardW * 0.46, Math.max(ringR + aR + 12, boardW * 0.36));
+  const orbitRy = Math.min(boardH * 0.46, Math.max(ringR + aR + 12, boardH * 0.32));
 
   nonMe.forEach(({ p: opp, i: origIdx }, pos) => {
     const t        = count === 1 ? 0.5 : pos / (count - 1);
