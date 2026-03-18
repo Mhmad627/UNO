@@ -571,6 +571,38 @@
 
   .not-playable { opacity: 0.5; cursor: not-allowed; }
 
+  /* Draw stack badge */
+  .draw-stack-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    border: 2px solid rgba(255,255,255,0.25);
+    border-radius: 14px;
+    padding: 4px 10px;
+    min-width: 46px;
+    box-shadow: 0 0 18px rgba(231,76,60,0.6), 0 2px 8px rgba(0,0,0,0.4);
+    z-index: 2;
+    animation: badgePulse 1s ease-in-out infinite;
+  }
+  .draw-stack-plus {
+    font-family: 'Boogaloo', cursive;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.8);
+    line-height: 1;
+  }
+  .draw-stack-num {
+    font-family: 'Boogaloo', cursive;
+    font-size: 1.8rem;
+    color: #fff;
+    line-height: 1;
+  }
+  @keyframes badgePulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 18px rgba(231,76,60,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+    50%       { transform: scale(1.08); box-shadow: 0 0 28px rgba(231,76,60,0.9), 0 2px 8px rgba(0,0,0,0.4); }
+  }
+
   /* Discard pile */
   .discard-pile {
     position: relative;
@@ -1007,6 +1039,10 @@
         <div class="direction-ring" id="direction-ring"></div>
         <div class="deck-pile" onclick="drawCard()" title="Draw a card">
           <div class="uno-card card-back" style="width:70px;height:105px;"></div>
+        </div>
+        <div id="draw-stack-badge" class="draw-stack-badge" style="display:none;">
+          <div class="draw-stack-plus">+</div>
+          <div class="draw-stack-num" id="draw-stack-num">0</div>
         </div>
         <div class="discard-pile">
           <div class="current-color-ring" id="color-ring"></div>
@@ -1452,6 +1488,16 @@ function renderGame(s) {
   const ring = document.getElementById('color-ring');
   const colorMap = { red: '#e74c3c', yellow: '#f1c40f', green: '#2ecc71', blue: '#3498db' };
   ring.style.borderColor = colorMap[s.currentColor] || 'white';
+
+  // Draw stack badge
+  const stackBadge = document.getElementById('draw-stack-badge');
+  const stackNum   = document.getElementById('draw-stack-num');
+  if (s.drawPending > 0) {
+    stackNum.textContent = s.drawPending;
+    stackBadge.style.display = 'flex';
+  } else {
+    stackBadge.style.display = 'none';
+  }
 
   // My hand
   const handEl = document.getElementById('my-hand');
