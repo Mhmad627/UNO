@@ -974,10 +974,66 @@
     font-size: 0.6rem;
     min-width: 18px;
   }
+
+  /* ── ONLINE / RECONNECT UI ── */
+  .player-row.offline span:not(.host-badge):not(.offline-badge) { opacity: 0.45; }
+  .player-row.offline .player-avatar { opacity: 0.4; filter: grayscale(1); }
+  .offline-badge {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: rgba(255,255,255,0.06);
+    border: 1px dashed rgba(255,255,255,0.2);
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
+    white-space: nowrap;
+  }
+  .player-row.offline .kick-btn { margin-left: 0.4rem; }
+  .player-node.offline .node-avatar { opacity: 0.35; filter: grayscale(1); box-shadow: none; }
+  .player-node.offline .node-name { opacity: 0.5; text-decoration: line-through; }
+  .player-node.offline .node-avatar::after {
+    content: '⏳';
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    font-size: 0.8rem;
+    filter: none;
+    opacity: 1;
+  }
+  .player-node .node-avatar { position: relative; }
+
+  #conn-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 500;
+    background: #b8860b;
+    color: #111;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 0.45rem 1rem;
+    transform: translateY(-110%);
+    transition: transform 0.25s ease;
+    pointer-events: none;
+  }
+  #conn-banner.show { transform: translateY(0); }
+  #conn-banner.bad  { background: var(--red, #e63946); color: #fff; }
+
+  .leave-link {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0.4rem;
+  }
+  .leave-link:hover { color: #fff; }
 </style>
 </head>
 <body>
 <div id="app">
+  <div id="conn-banner"></div>
 
   <!-- ── LOBBY SCREEN ── -->
   <div id="lobby-screen" class="screen active">
@@ -985,7 +1041,7 @@
       <div class="logo">
         <span>U</span><span>N</span><span>O</span>
       </div>
-      <div class="logo-sub">Local Multiplayer</div>
+      <div class="logo-sub">Online Multiplayer</div>
     </div>
 
     <div class="card-form">
@@ -1004,7 +1060,7 @@
     <div class="room-code-display">
       <h2>Room Code</h2>
       <div class="code-big" id="display-code">------</div>
-      <div style="color:var(--muted); font-size:0.85rem; margin-top:0.5rem;">Share this code with friends on your Wi-Fi</div>
+      <div style="color:var(--muted); font-size:0.85rem; margin-top:0.5rem;">Share this code with your friends</div>
     </div>
 
     <div class="players-list" id="lobby-players"></div>
@@ -1012,6 +1068,7 @@
     <div style="width:100%; max-width:400px; display:flex; flex-direction:column; gap:0.5rem;">
       <button class="btn btn-success" id="start-btn" onclick="startGame()" style="display:none;">▶ Start Game</button>
       <div style="text-align:center; color:var(--muted); font-size:0.9rem;" id="waiting-msg">Waiting for host to start...</div>
+      <button class="leave-link" onclick="leaveGame()">← Leave room</button>
     </div>
   </div>
 
@@ -1023,11 +1080,12 @@
       <div class="turn-indicator" id="turn-indicator">-</div>
       <div style="display:flex;align-items:center;gap:0.5rem;">
         <div style="font-size:0.8rem; color:var(--muted);" id="deck-info"></div>
-        <div class="host-menu-wrap" id="host-menu-wrap" style="display:none;">
+        <div class="host-menu-wrap" id="host-menu-wrap">
           <button class="host-menu-btn" onclick="toggleHostMenu(event)">⚙️</button>
           <div class="host-dropdown" id="host-dropdown">
-            <button class="host-dropdown-item" onclick="restartGame()">🔄 Restart Game</button>
-            <button class="host-dropdown-item danger" onclick="cancelGame()">🚪 Cancel → Lobby</button>
+            <button class="host-dropdown-item host-only" onclick="restartGame()">🔄 Restart Game</button>
+            <button class="host-dropdown-item danger host-only" onclick="cancelGame()">🚪 Cancel → Lobby</button>
+            <button class="host-dropdown-item danger" onclick="leaveGame()">🏳️ Leave Game</button>
           </div>
         </div>
       </div>
@@ -1074,7 +1132,7 @@
     <div class="scoreboard" id="scoreboard"></div>
     <button class="btn btn-success" onclick="restartGame()" id="restart-btn" style="width:200px; display:none;">▶ Play Again Now</button>
     <button class="btn btn-primary" onclick="rematch()" id="rematch-btn" style="width:200px; display:none;">🔄 Back to Lobby</button>
-    <button class="btn btn-outline" onclick="backToLobby()" style="width:200px;">← Leave</button>
+    <button class="btn btn-outline" onclick="leaveGame()" style="width:200px;">← Leave</button>
   </div>
 
   <!-- ── COLOR PICKER MODAL ── -->
@@ -1169,70 +1227,207 @@ let isHost = false;
 let myName = '';
 let wasMyTurn = false;
 
+// Session = { token, code, name } persisted in localStorage so a refresh,
+// a dropped Wi-Fi connection or a phone going to sleep can reclaim the same seat.
+const SESSION_KEY = 'uno-session';
+let session = null;
+let pendingAction = null;   // message to send once the socket opens (create/join)
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+let intentionalClose = false;
+
+function loadSession() {
+  try { session = JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch (e) { session = null; }
+  return session;
+}
+function saveSession(s) {
+  session = s;
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {}
+}
+function clearSession() {
+  session = null;
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+
 const AVATAR_COLORS = [
   '#e63946','#ffd166','#06d6a0','#118ab2','#7b2d8b','#f4a261','#2a9d8f','#e9c46a',
   '#e76f51','#264653','#a8dadc','#457b9d','#c77dff','#80b918','#ff6b6b'
 ];
 
-function connect(onOpen) {
+function connect() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  clearTimeout(reconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}`);
+  const sock = new WebSocket(`${proto}//${location.host}`);
+  ws = sock;
 
   ws.onopen = () => {
-    if (onOpen) onOpen();
+    if (ws !== sock) return; // superseded by a newer connection
+    reconnectDelay = 1000;
+    if (pendingAction) {
+      const action = pendingAction;
+      pendingAction = null;
+      if (action.type !== 'rejoin') setError('');
+      ws.send(JSON.stringify(action));
+    } else if (session) {
+      ws.send(JSON.stringify({ type: 'rejoin', token: session.token, code: session.code }));
+    } else {
+      hideBanner();
+    }
   };
 
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
+    if (ws !== sock) return;
+    let msg;
+    try { msg = JSON.parse(e.data); } catch (err) { return; }
     handleServerMsg(msg);
   };
 
   ws.onclose = () => {
-    addChat('⚠️ Disconnected from server');
-    setTimeout(connect, 2000);
+    // A stale socket closing must not clobber a newer one or trigger a duplicate reconnect
+    if (ws !== sock) return;
+    ws = null;
+    if (intentionalClose) return;
+    if (session) {
+      showBanner('⚠️ Connection lost — reconnecting…', true);
+      scheduleReconnect();
+    } else if (pendingAction) {
+      setError('Could not reach the server. Retrying…');
+      scheduleReconnect();
+    }
   };
 
   ws.onerror = () => {};
 }
 
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 1.6, 10000);
+}
+
+// Reconnect immediately when the tab wakes up or the network comes back
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (session || pendingAction)) {
+    reconnectDelay = 1000;
+    connect();
+  }
+});
+window.addEventListener('online', () => { reconnectDelay = 1000; connect(); });
+
 function send(obj) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  else showBanner('⚠️ Not connected — reconnecting…', true);
 }
 
 // ─── Server Messages ───────────────────────────────────────────────────────────
 function handleServerMsg(msg) {
-  if (msg.type === 'created' || msg.type === 'joined') {
+  if (msg.type === 'created' || msg.type === 'joined' || msg.type === 'rejoined') {
+    saveSession({ token: msg.token, code: msg.code, name: msg.name || myName });
+    myName = msg.name || myName;
     document.getElementById('display-code').textContent = msg.code;
     document.getElementById('game-code').textContent = msg.code;
-    showScreen('waiting-screen');
+    setError('');
+    if (msg.type === 'rejoined') {
+      showBanner('✅ Reconnected', false);
+      setTimeout(hideBanner, 1500);
+    } else {
+      hideBanner();
+      showScreen('waiting-screen');
+    }
+    return;
   }
 
   if (msg.type === 'error') {
-    document.getElementById('lobby-error').textContent = msg.msg;
+    if (msg.code === 'no-session') {
+      // Our saved seat is gone (room closed / server restarted) — start fresh
+      clearSession();
+      hideBanner();
+      resetToLobbyScreen(msg.msg);
+      return;
+    }
+    if (document.getElementById('lobby-screen').classList.contains('active')) {
+      setError(msg.msg);
+    } else {
+      addChat(`❌ ${msg.msg}`);
+    }
+    return;
   }
 
   if (msg.type === 'state') {
     myId = msg.myId;
     gameState = msg;
     renderState(msg);
+    return;
   }
 
   if (msg.type === 'chat') {
     addChat(msg.msg);
+    return;
+  }
+
+  if (msg.type === 'room-closed') {
+    clearSession();
+    resetToLobbyScreen(msg.reason || 'The game has ended.');
+    return;
   }
 
   if (msg.type === 'kicked') {
-    alert('You were kicked from the game.');
-    location.reload();
+    clearSession();
+    resetToLobbyScreen('You were kicked from the game.');
+    return;
   }
+
+  if (msg.type === 'left') {
+    clearSession();
+    resetToLobbyScreen('');
+    return;
+  }
+
+  if (msg.type === 'replaced') {
+    // Same seat was opened in another tab/device — stop this one from fighting over it.
+    // Only forget the session in memory: localStorage is shared with the tab that now
+    // owns the seat, so removing the key here would break that tab's next refresh.
+    intentionalClose = true;
+    session = null;
+    resetToLobbyScreen('This game was opened in another tab.');
+    return;
+  }
+}
+
+function resetToLobbyScreen(message) {
+  gameState = null;
+  myId = null;
+  isHost = false;
+  wasMyTurn = false;
+  pendingAction = null;
+  document.getElementById('win-screen').classList.remove('show');
+  document.getElementById('color-modal').classList.remove('show');
+  const log = document.getElementById('chat-log');
+  if (log) log.innerHTML = '';
+  showScreen('lobby-screen');
+  if (myName) document.getElementById('player-name').value = myName;
+  setError(message || '');
+}
+
+function showBanner(text, bad) {
+  const b = document.getElementById('conn-banner');
+  if (!b) return;
+  b.textContent = text;
+  b.classList.toggle('bad', !!bad);
+  b.classList.add('show');
+}
+function hideBanner() {
+  document.getElementById('conn-banner')?.classList.remove('show');
 }
 
 // ─── Rendering ─────────────────────────────────────────────────────────────────
 function renderState(s) {
   // Lobby state
+  isHost = s.hostId ? s.hostId === myId : s.players[0]?.id === myId;
+
   if (s.state === 'lobby') {
     showScreen('waiting-screen');
-    isHost = s.players[0]?.id === myId;
     renderLobbyPlayers(s);
     document.getElementById('start-btn').style.display = isHost ? 'block' : 'none';
     document.getElementById('waiting-msg').style.display = isHost ? 'none' : 'block';
@@ -1280,16 +1475,23 @@ function renderLobbyPlayers(s) {
   el.innerHTML = `<h3>Players (${s.players.length}/15)</h3>`;
   s.players.forEach((p, i) => {
     const row = document.createElement('div');
-    row.className = 'player-row';
+    row.className = 'player-row' + (p.connected === false ? ' offline' : '');
     const avatar = document.createElement('div');
     avatar.className = 'player-avatar';
     avatar.style.background = AVATAR_COLORS[i % AVATAR_COLORS.length];
     avatar.textContent = p.name[0]?.toUpperCase() || '?';
     row.appendChild(avatar);
     const name = document.createElement('span');
-    name.textContent = p.name;
+    name.textContent = p.id === myId ? `${p.name} (you)` : p.name;
     row.appendChild(name);
-    if (i === 0) {
+    if (p.connected === false) {
+      const off = document.createElement('span');
+      off.className = 'offline-badge';
+      off.textContent = '⏳ reconnecting';
+      row.appendChild(off);
+    }
+    const playerIsHost = s.hostId ? p.id === s.hostId : i === 0;
+    if (playerIsHost) {
       const badge = document.createElement('span');
       badge.className = 'host-badge';
       badge.textContent = 'Host';
@@ -1397,14 +1599,13 @@ function renderGame(s) {
     deckPileEl.classList.toggle('must-draw', mustDraw);
   }
 
-  // Host controls visibility
-  const hostMenuWrap = document.getElementById('host-menu-wrap');
-  if (hostMenuWrap) hostMenuWrap.style.display = isHost ? 'block' : 'none';
+  // Menu: everyone can leave; only the host sees restart / cancel / kick
+  const dropdown = document.getElementById('host-dropdown');
+  dropdown.querySelectorAll('.host-only').forEach(el => { el.style.display = isHost ? '' : 'none'; });
+  dropdown.querySelectorAll('.kick-entry').forEach(el => el.remove());
 
   // Populate kick entries in host dropdown
   if (isHost) {
-    const dropdown = document.getElementById('host-dropdown');
-    dropdown.querySelectorAll('.kick-entry').forEach(el => el.remove());
     const others = s.players.filter(p => p.id !== myId);
     if (others.length > 0) {
       const sep = document.createElement('div');
@@ -1467,8 +1668,10 @@ function renderGame(s) {
 
     const isCurrent = origIdx === s.currentPlayerIndex;
     const isNext    = origIdx === nextIdx;
+    const offline   = opp.connected === false;
     const node      = document.createElement('div');
-    node.className  = 'player-node' + (isCurrent ? ' active' : '') + (isNext ? ' next' : '');
+    node.className  = 'player-node' + (isCurrent ? ' active' : '') + (isNext ? ' next' : '') + (offline ? ' offline' : '');
+    if (offline) node.title = `${opp.name} disconnected — waiting for them to come back`;
     node.style.left = left.toFixed(1) + '%';
     node.style.top  = top.toFixed(1) + '%';
     node.innerHTML  = `
@@ -1564,10 +1767,7 @@ function createRoom() {
   if (!name) return setError('Please enter your name!');
   myName = name;
   setError('Connecting...');
-  connect(() => {
-    setError('');
-    send({ type: 'create', name });
-  });
+  queueAction({ type: 'create', name });
 }
 
 function joinRoom() {
@@ -1577,10 +1777,32 @@ function joinRoom() {
   if (!code) return setError('Please enter a room code!');
   myName = name;
   setError('Connecting...');
-  connect(() => {
-    setError('');
-    send({ type: 'join', name, code });
-  });
+  // Pass the old token so the server can hand back our seat if it's the same room
+  queueAction({ type: 'join', name, code, token: session?.token });
+}
+
+// Send once the socket is open (opens it if needed). Any previous seat is abandoned.
+function queueAction(action) {
+  intentionalClose = false;
+  const old = session;
+  clearSession();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ ...action, token: action.token ?? old?.token }));
+  } else {
+    pendingAction = { ...action, token: action.token ?? old?.token };
+    reconnectDelay = 1000;
+    connect();
+  }
+}
+
+function leaveGame() {
+  closeHostMenu();
+  if (isHost && gameState && gameState.players.length > 1) {
+    if (!confirm('You are the host — leaving will end the game for everyone. Leave anyway?')) return;
+  }
+  if (ws && ws.readyState === WebSocket.OPEN) send({ type: 'leave' });
+  clearSession();
+  resetToLobbyScreen('');
 }
 
 function startGame() {
@@ -1647,11 +1869,7 @@ function closeHostMenu() {
 }
 
 function kickPlayer(targetId) {
-  ws.send(JSON.stringify({ type: 'kick', targetId }));
-}
-
-function backToLobby() {
-  location.reload();
+  send({ type: 'kick', targetId });
 }
 
 // ─── UI Utils ──────────────────────────────────────────────────────────────────
@@ -1690,8 +1908,23 @@ document.addEventListener('keydown', e => {
       if (code) joinRoom(); else createRoom();
     }
   }
-  if (e.key === 'u' || e.key === 'U') callUno();
+  if (e.key === 'u' || e.key === 'U') {
+    if (document.getElementById('game-screen').classList.contains('active')) callUno();
+  }
 });
+
+// ─── Boot: pick up where we left off ──────────────────────────────────────────
+(function boot() {
+  const s = loadSession();
+  if (s && s.token) {
+    myName = s.name || '';
+    if (myName) document.getElementById('player-name').value = myName;
+    document.getElementById('room-code-input').value = s.code || '';
+    setError(`Reconnecting to room ${s.code}…`);
+    showBanner('🔄 Reconnecting to your game…', false);
+    connect();
+  }
+})();
 </script>
 </body>
 </html>
